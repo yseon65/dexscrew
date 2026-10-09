@@ -270,7 +270,7 @@ class PPO(object):
         if not fn:
             return
         print("loading checkpoint from path", fn)
-        checkpoint = torch.load(fn)
+        checkpoint = torch.load(fn, weights_only=False)
         self.model.load_state_dict(checkpoint['model'])
         self.running_mean_std.load_state_dict(checkpoint['running_mean_std'])
         if self.normalize_priv:
@@ -279,7 +279,7 @@ class PPO(object):
             self.point_cloud_mean_std.load_state_dict(checkpoint['point_cloud_mean_std'])
 
     def restore_test(self, fn):
-        checkpoint = torch.load(fn)
+        checkpoint = torch.load(fn, weights_only=False)
         self.model.load_state_dict(checkpoint['model'])
         if self.normalize_input:
             self.running_mean_std.load_state_dict(checkpoint['running_mean_std'])

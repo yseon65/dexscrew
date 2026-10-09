@@ -194,8 +194,12 @@ class ProprioAdapt(object):
 
             self.log_tensorboard()
 
-            if self.agent_steps % 1e8 == 0:
+            # `agent_steps % 1e8 == 0` never holds when the batch size does not divide 1e8 (e.g. 48 envs),
+            # so save whenever a 10M (model_last) / 100M (snapshot) boundary is crossed instead.
+            prev_steps = self.agent_steps - self.batch_size
+            if self.agent_steps // 1e8 > prev_steps // 1e8:
                 self.save(os.path.join(self.nn_dir, f'{self.agent_steps // 1e8}00m'))
+            if self.agent_steps // 1e7 > prev_steps // 1e7:
                 self.save(os.path.join(self.nn_dir, f'model_last'))
 
             mean_rewards = self.mean_eps_reward.get_mean()
@@ -218,7 +222,7 @@ class ProprioAdapt(object):
             self.writer.add_scalar(f'{k}/frame', v, self.agent_steps)
 
     def restore_train(self, fn):
-        checkpoint = torch.load(fn)
+        checkpoint = torch.load(fn, weights_only=False)
         cprint('careful, using non-strict matching', 'red', attrs=['bold'])
         self.model.load_state_dict(checkpoint['model'], strict=False)
         self.running_mean_std.load_state_dict(checkpoint['running_mean_std'])
@@ -230,7 +234,7 @@ class ProprioAdapt(object):
     def restore_test(self, fn):
         if not fn:
             return
-        checkpoint = torch.load(fn)
+        checkpoint = torch.load(fn, weights_only=False)
         self.running_mean_std.load_state_dict(checkpoint['running_mean_std'])
         self.model.load_state_dict(checkpoint['model'])
         self.sa_mean_std.load_state_dict(checkpoint['sa_mean_std'])

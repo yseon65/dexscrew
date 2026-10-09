@@ -27,10 +27,18 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
-from dexscrew.tasks.xhand_hora import XHandHora
-
-# Mappings from strings to environments
-isaacgym_task_map = {
-    'XHandHoraNutBolt': XHandHora,
-    'XHandHoraScrewDriver': XHandHora,
-}
+def __getattr__(name):
+    # Lazy imports: the IsaacGym task needs `isaacgym`, the Isaac Lab task needs a running SimulationApp.
+    if name == 'isaacgym_task_map':
+        from dexscrew.tasks.xhand_hora import XHandHora
+        return {
+            'XHandHoraNutBolt': XHandHora,
+            'XHandHoraScrewDriver': XHandHora,
+        }
+    if name == 'isaaclab_task_map':
+        from dexscrew.tasks.xhand_hora_lab import XHandHoraLab
+        return {
+            'XHandHoraNutBolt': XHandHoraLab,
+            'XHandHoraScrewDriver': XHandHoraLab,
+        }
+    raise AttributeError(name)
