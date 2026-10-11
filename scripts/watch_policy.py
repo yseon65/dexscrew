@@ -19,7 +19,9 @@ from isaaclab.app import AppLauncher
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--task', default='XHandHoraNutBolt')
-parser.add_argument('--run', required=True, help='training output dir (contains stage1_nn/)')
+parser.add_argument('--run', required=True, help='training output dir (contains stage1_nn/ or stage2_nn/)')
+parser.add_argument('--student', action='store_true',
+                    help='run is a ProprioAdapt student (stage2_nn/*.ckpt): act from proprio history only')
 parser.add_argument('--num_envs', type=int, default=4)
 parser.add_argument('--reload_sec', type=float, default=120.0)
 parser.add_argument('--headless', action='store_true', help='no GUI, only print stats (for testing)')
@@ -32,6 +34,7 @@ from omegaconf import OmegaConf  # noqa: E402
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, REPO)
+from dexscrew.algo.ppo.padapt import ProprioAdapt  # noqa: E402
 from dexscrew.algo.ppo.ppo import PPO  # noqa: E402
 from dexscrew.tasks import isaaclab_task_map  # noqa: E402
 from dexscrew.utils.reformat import omegaconf_to_dict  # noqa: E402
@@ -43,17 +46,19 @@ OmegaConf.register_new_resolver('resolve_default', lambda default, arg: default 
 
 
 def newest_checkpoint(run_dir):
-    ckpts = glob.glob(os.path.join(run_dir, 'stage1_nn', '*.pth'))
+    ckpts = glob.glob(os.path.join(run_dir, 'stage2_nn', '*.ckpt') if args.student
+                      else os.path.join(run_dir, 'stage1_nn', '*.pth'))
     return max(ckpts, key=os.path.getmtime) if ckpts else None
 
 
 with initialize_config_dir(config_dir=os.path.join(REPO, 'configs'), version_base=None):
     config = compose('config', overrides=[f'task={args.task}', f'task.env.numEnvs={args.num_envs}',
-                                          'train.algo=PPO', 'test=True'] + overrides)
+                                          'test=True'] + overrides
+                     + (['train.algo=ProprioAdapt', 'train.ppo.proprio_adapt=True'] if args.student else ['train.algo=PPO']))
 task_config = omegaconf_to_dict(config.task)
 env = isaaclab_task_map[args.task](task_config, config.sim_device, 0, args.headless)
 watch_dir = os.path.join(REPO, 'outputs', 'watch')
-agent = PPO(env, watch_dir, full_config=config)
+agent = (ProprioAdapt if args.student else PPO)(env, watch_dir, full_config=config)
 agent.set_eval()
 
 ckpt, last_check = None, 0.0
@@ -81,12 +86,19 @@ while app.is_running():
     pc = obs_dict['point_cloud_info']
     if agent.normalize_point_cloud:
         pc = agent.point_cloud_mean_std(pc.reshape(-1, 3)).reshape((pc.shape[0], -1, 3))
-    input_dict = {
-        'obs': agent.running_mean_std(obs_dict['obs']),
-        'priv_info': agent.priv_mean_std(obs_dict['priv_info']) if agent.normalize_priv else obs_dict['priv_info'],
-        'proprio_hist': obs_dict['proprio_hist'],
-        'point_cloud_info': pc,
-    }
+    if args.student:  # same inputs as ProprioAdapt.test(): no privileged info
+        input_dict = {
+            'obs': agent.running_mean_std(obs_dict['obs']),
+            'proprio_hist': agent.sa_mean_std(obs_dict['proprio_hist']),
+            'point_cloud_info': pc,
+        }
+    else:
+        input_dict = {
+            'obs': agent.running_mean_std(obs_dict['obs']),
+            'priv_info': agent.priv_mean_std(obs_dict['priv_info']) if agent.normalize_priv else obs_dict['priv_info'],
+            'proprio_hist': obs_dict['proprio_hist'],
+            'point_cloud_info': pc,
+        }
     mu, _, _ = agent.model.act_inference(input_dict)
     obs_dict, r, done, _ = env.step(torch.clamp(mu, -1.0, 1.0))
     ep_rew += r

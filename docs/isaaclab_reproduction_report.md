@@ -234,3 +234,7 @@ $PY scripts/watch_policy.py --task XHandHoraNutBolt --run outputs/XHandHoraNutBo
 2. **nut teacher의 정체 종료(약 45%) 원인 분석.** 정책 한계인지, 포팅 물리 차이(마찰, 접촉) 때문인지 viewer로 확인한다.
 3. **boxnut / crossnut 학습.** `task.env.object.type=screw_boxnut` 등으로 지정한다.
 4. **실기 배포 단계 포팅.** `scripts/convert_student_jit.sh`와 `xhand-deploy`가 Isaac Lab 체크포인트와 호환되는지 확인한다.
+
+## 후속 작업
+
+넛 크기 일반화(0.7–1.25) 재학습과 DexGen 데이터 수집은 [scale_generalization_2026-10-11.md](scale_generalization_2026-10-11.md)에 정리했다.

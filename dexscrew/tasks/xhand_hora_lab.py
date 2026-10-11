@@ -704,6 +704,11 @@ class XHandHoraLab(DirectRLEnv):
             sampled_pose[:, self.numActions + 0] = self.object_x
             sampled_pose[:, self.numActions + 1] = self.object_y
             sampled_pose[:, self.numActions + 2] = self.object_z
+            if self.config['env'].get('keepNutHeight', False):
+                # the whole nut/bolt asset is scaled about its base; lift/lower it so the nut joint
+                # (z = nutJointHeight at scale 1) stays at the same height for every scale
+                s = float(self.randomize_scale_list[n_s])
+                sampled_pose[:, self.numActions + 2] += self.config['env'].get('nutJointHeight', 0.1) * (1.0 - s)
 
             object_pose_noise = torch.normal(0, self.random_pose_noise, size=(sampled_pose.shape[0], 7), device=self.device, dtype=torch.float)
             object_pose_noise[:, 3:] = 0
