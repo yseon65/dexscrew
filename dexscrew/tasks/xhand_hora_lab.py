@@ -328,6 +328,7 @@ class XHandHoraLab(DirectRLEnv):
         # useful buffers
         self.init_pose_buf = torch.zeros((self.num_envs, self.num_dofs), device=self.device, dtype=torch.float)
         self.actions = torch.zeros((self.num_envs, self.num_actions), device=self.device, dtype=torch.float)
+        self.prev_actions_for_rate = torch.zeros_like(self.actions)
         self.torques = torch.zeros((self.num_envs, self.control_freq_inv, self.num_dofs), device=self.device, dtype=torch.float)
         self.dof_vel_finite_diff = torch.zeros((self.num_envs, self.control_freq_inv, self.num_actions), device=self.device, dtype=torch.float)
 
@@ -716,7 +717,7 @@ class XHandHoraLab(DirectRLEnv):
 
             pos = sampled_pose[:, :self.numActions]
             self._update_priv_buf(env_id=s_ids, name='hand_joint_pos', value=pos)
-            half_widths = torch.tensor(0.1 * (self.xhand_dof_upper_limits - self.xhand_dof_lower_limits) / 2.0, device=self.device, dtype=torch.float)
+            half_widths = torch.tensor(self.config['env'].get('initJointNoiseFrac', 0.1) * (self.xhand_dof_upper_limits - self.xhand_dof_lower_limits) / 2.0, device=self.device, dtype=torch.float)
             hand_joint_noise = (torch.rand_like(half_widths) * 2 - 1) * half_widths
             pos = pos + hand_joint_noise
             self.sampled_pose = sampled_pose[:, :self.numActions]
@@ -784,6 +785,7 @@ class XHandHoraLab(DirectRLEnv):
 
         self.contact_thresh[env_ids] = 0.05
         self.progress_buf[env_ids] = 0
+        self.prev_actions_for_rate[env_ids] = 0
         self.obs_buf[env_ids] = 0
         self.priv_info_buf[env_ids, 0:3] = 0
         self.proprio_hist_buf[env_ids] = 0
@@ -930,6 +932,21 @@ class XHandHoraLab(DirectRLEnv):
             rotate_penalty, self._get_reward_scale_by_name('rotate_penalty'),
             proximity_reward, self._get_reward_scale_by_name('proximity_reward')
         )
+
+        # Optional smoothness penalties (off unless the scale is set, e.g. +task.env.reward.joint_acc_penalty_scale=-0.05).
+        # joint_acc: squared change of the finite-difference joint velocity between consecutive physics substeps
+        # (incl. the boundary to the previous control step); it targets the under-damped PD ringing of fingers that
+        # are not in contact. action_rate: squared change of the policy action between control steps.
+        if 'joint_acc_penalty' in self.reward_scale_dict:
+            v = torch.cat([self.dof_vel_prev[:, -1:], self.dof_vel_finite_diff], dim=1)
+            joint_acc_penalty = ((v[:, 1:] - v[:, :-1]) ** 2).sum(dim=(1, 2)) * (self.dt ** 2) * 1e4
+            self.rew_buf += self._get_reward_scale_by_name('joint_acc_penalty') * joint_acc_penalty
+            self.extras['joint_acc_penalty'] = joint_acc_penalty.mean()
+        if 'action_rate_penalty' in self.reward_scale_dict:
+            action_rate_penalty = ((self.actions[:, :self.num_actions] - self.prev_actions_for_rate) ** 2).sum(-1)
+            self.rew_buf += self._get_reward_scale_by_name('action_rate_penalty') * action_rate_penalty
+            self.extras['action_rate_penalty'] = action_rate_penalty.mean()
+        self.prev_actions_for_rate = self.actions[:, :self.num_actions].clone()
 
         self.reset_buf[:] = self.check_termination(self.object_pos)
         self.extras['step_all_reward'] = self.rew_buf.mean()
